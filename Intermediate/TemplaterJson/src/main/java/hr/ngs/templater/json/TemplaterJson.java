@@ -9,37 +9,30 @@ import hr.ngs.templater.TemplateDocument;
 
 import javax.imageio.ImageIO;
 import java.io.*;
-import java.util.Base64;
-import java.util.Formatter;
+import java.nio.file.Files;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.*;
 
+/*
+
+103680 records - 11.7 sec.
+207360 records - 64 sec. (1 min)
+311040 records - 172 sec. (3 min)
+
+ */
 public class TemplaterJson {
+    private static final Integer APPROX_NUMBER_OF_TRANSACTIONS = 300_000;
 
-    public static void main(final String[] args) {
-        int exitCode;
-        if (args.length == 0) {
-            outputHelp(System.out);
-            exitCode = 0;
-        } else if (args.length > 3) {
-            System.err.println("Too many arguments (" + args.length + ")!");
-            System.err.println();
-            outputHelp(System.err);
-            exitCode = 1;
-        } else {
-            try {
-                exitCode = process(
-                        args[0],
-                        args.length > 1 ? args[1] : null,
-                        args.length > 2 ? args[2] : null);
-            } catch (Throwable t) {
-                System.err.println("An error occurred while processing:");
-                t.printStackTrace();
-                exitCode = 2;
-            }
-        }
-        System.exit(exitCode);
+    public static void main(String[] args) throws IOException {
+        process(
+                TemplaterJson.class.getResource("/template/template-masked.xlsx").getPath(),
+                TemplaterJson.class.getResource("/template/data.json").getPath()
+
+        );
     }
 
-    public static int process(String templatePath, String dataPath, String outputPath) throws IOException {
+    public static int process(String templatePath, String dataPath) throws IOException {
         // Prepare the input template stream, check extension
         SupportedType st = SupportedType.getByFilename(templatePath);
         if (st == null) {
@@ -53,9 +46,14 @@ public class TemplaterJson {
         InputStream dataStream = dataPath == null ? System.in : new FileInputStream(dataPath);
 
         // Prepare the output stream (file or stdout)
-        OutputStream outputStream = outputPath == null ? System.out : new FileOutputStream(outputPath);
+        File tmp = File.createTempFile("test", ".xlsx");
+        OutputStream outputStream = Files.newOutputStream(tmp.toPath());
 
         process(st.extension, templateStream, dataStream, outputStream);
+
+
+        System.out.println(tmp.getPath());
+//        Desktop.getDesktop().open(tmp);
         return 0;
     }
 
@@ -63,7 +61,21 @@ public class TemplaterJson {
         DslJson<Object> dslJson = new DslJson<Object>(new DslJson.Settings<Object>());
         JsonReader<Object> reader = dslJson.newReader(dataStream, new byte[4096]);
         reader.getNextToken();
-        return ObjectConverter.deserializeObject(reader);
+        LinkedHashMap result = (LinkedHashMap) ObjectConverter.deserializeObject(reader);
+
+        java.util.List transactions = (java.util.List) result.get("transactions");
+
+        java.util.List newTransactions = new ArrayList();
+
+        while (newTransactions.size() < APPROX_NUMBER_OF_TRANSACTIONS) {
+            newTransactions.addAll(transactions);
+        }
+
+        result.put("transactions", newTransactions);
+
+        System.out.println("Running test on " + newTransactions.size() + " transactions");
+
+        return result;
     }
 
     public static void process(
@@ -76,9 +88,14 @@ public class TemplaterJson {
 
         TemplateDocument tpl = Configuration.builder()
                 .include(IMAGE_DECODER)
-                .build().open(templateStream, extension, outputStream);
+                .build("/Users/ivan/IdeaProjects/TemplaterExamples/Advanced/TemplaterServer/templater.lic")
+                .open(templateStream, extension, outputStream);
+
+        Instant start = Instant.now();
         tpl.process(data);
         tpl.close();
+
+        System.out.println(Duration.between(start, Instant.now()).toMillis());
     }
 
     private static DocumentFactoryBuilder.Formatter IMAGE_DECODER = new DocumentFactoryBuilder.Formatter() {
